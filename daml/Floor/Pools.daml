@@ -1,0 +1,46 @@
+-- Separate purposes. A party who can see one pool is not given a choice
+-- over another. Player funds are Token Standard holdings owned by the
+-- player, not a balance inside the house.
+
+module Floor.Pools where
+
+data PoolPurpose = House | Prize | StakeRewards | PayDeskEscrow
+  deriving (Eq, Show)
+
+template Pool
+  with
+    purpose : PoolPurpose
+    operator : Party
+    label : Text
+  where
+    signatory operator
+    ensure label /= ""
+
+    -- The operator may pause a pool. Pausing does not transfer value.
+    choice Pause : ContractId Pool
+      controller operator
+      do
+        create this with label = label
+
+-- House withdrawal is a separate proposal. It cannot name a player holding
+-- or a Pay Desk escrow. Two application parties must agree.
+template HouseWithdrawal
+  with
+    operator : Party
+    second : Party
+    destination : Party
+    agreed : Bool
+  where
+    signatory operator
+    observer second
+
+    choice Agree : ContractId HouseWithdrawal
+      controller second
+      do
+        create this with agreed = True
+
+    choice Execute : ()
+      controller operator
+      do
+        assertMsg "The second operator has not agreed." agreed
+        pure ()

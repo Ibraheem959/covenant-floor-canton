@@ -1,0 +1,18 @@
+-- Random tables stay closed until a disclosed, verifiable randomness
+-- contract exists on Canton. This choice always aborts.
+
+module Floor.Tables where
+
+template RandomRound
+  with
+    player : Party
+    operator : Party
+    game : Text
+  where
+    signatory player
+    observer operator
+
+    choice Settle : ()
+      controller operator
+      do
+        abort "Random games are not live. No verified Canton randomness source is configured."

@@ -1,0 +1,85 @@
+-- Pay Desk. The poster is the only signatory. The operator may see the
+-- board and may not move the reward. Production settlement must consume a
+-- CIP-0112 Holding in the same transaction as Pay, ReturnWithReason,
+-- CloseAfterSilence, or CancelUnsubmitted. This module does not invent a token.
+
+module Floor.PayDesk where
+
+import DA.Assert (assertMsg)
+import DA.Text (length)
+import DA.Time (addRelTime, hours)
+
+template Job
+  with
+    poster : Party
+    operator : Party
+    brief : Text
+    reward : Decimal
+    postedAt : Time
+    worker : Optional Party
+    work : Text
+    submittedAt : Optional Time
+    reason : Text
+    settled : Bool
+  where
+    signatory poster
+    observer operator
+    ensure
+      reward >= 1.0
+        && length brief > 0
+        && length brief <= 240
+        && length work <= 240
+        && length reason <= 240
+
+    choice Submit : ContractId Job
+      with
+        by : Party
+        note : Text
+      controller by
+      do
+        assertMsg "Only the first submission is eligible." (worker == None)
+        assertMsg "The poster cannot submit their own job." (by /= poster)
+        assertMsg "Work is required." (length note > 0)
+        now <- getTime
+        create this with worker = Some by, work = note, submittedAt = Some now
+
+    choice Pay : ContractId Job
+      controller poster
+      do
+        assertMsg "Nothing is waiting to be paid." (not settled && worker /= None)
+        create this with settled = True
+
+    choice ReturnWithReason : ContractId Job
+      with
+        why : Text
+      controller poster
+      do
+        assertMsg "A reason is required." (length why > 0)
+        now <- getTime
+        at <- case submittedAt of
+          None -> abort "Nothing has been submitted."
+          Some t -> pure t
+        assertMsg "The 48 hour review has ended." (now < addRelTime at (hours 48))
+        assertMsg "Already settled." (not settled)
+        create this with settled = True, reason = why
+
+    choice CloseAfterSilence : ContractId Job
+      with
+        actor : Party
+      controller actor
+      do
+        now <- getTime
+        at <- case submittedAt of
+          None -> abort "Nobody has submitted."
+          Some t -> pure t
+        assertMsg "The review is still open." (now >= addRelTime at (hours 48))
+        assertMsg "Already settled." (not settled)
+        create this with settled = True
+
+    choice CancelUnsubmitted : ContractId Job
+      controller poster
+      do
+        assertMsg "A submission is already in." (worker == None && not settled)
+        create this with settled = True
+
+-- There is intentionally no choice that edits the brief.
